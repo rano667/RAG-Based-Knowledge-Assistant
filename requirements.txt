@@ -1,5 +1,7 @@
 langchain
 langchain-community
+langchain-openai
+sentence-transformers
 openai
 faiss-cpu
 pypdf
