@@ -1,6 +1,6 @@
 import os
 from langchain_community.document_loaders import PyPDFLoader
-
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 # # Loaded X pages ->  Text printed from PDF
 # def load_documents():
 #     loader = PyPDFLoader("data/invoice-0.pdf")
@@ -25,3 +25,21 @@ def load_all_pdfs(folder_path):
 
 docs = load_all_pdfs("data")
 print(f"Total pages loaded: {len(docs)}")
+
+def split_documents(documents):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=700, # 500
+        chunk_overlap=150 # 100
+    )
+    
+    chunks = text_splitter.split_documents(documents)
+    return chunks
+
+
+chunks = split_documents(docs)
+
+print(f"Total chunks created: {len(chunks)}")
+
+for i, chunk in enumerate(chunks[:10]):
+    print(f"\n--- Chunk {i} ---\n")
+    print(chunk.page_content)
