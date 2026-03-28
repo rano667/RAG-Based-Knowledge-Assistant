@@ -6,6 +6,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
+from transformers import pipeline
+
 # Step 1: Text extracted
 
 # # Loaded X pages ->  Text printed from PDF
@@ -74,14 +76,14 @@ vectorstore = create_vector_store(chunks)
 
 print("Vector store created successfully")
 
-# query 0
-query = "What items are in invoice 0012820?"
+# # query 0
+# query = "What items are in invoice 0012820?"
 
-results = vectorstore.similarity_search(query, k=3)
+# results = vectorstore.similarity_search(query, k=3)
 
-for i, res in enumerate(results):
-    print(f"\n--- Result {i} ---\n")
-    print(res.page_content)
+# for i, res in enumerate(results):
+#     print(f"\n--- Result {i} ---\n")
+#     print(res.page_content)
 
 # # query 1
 # query1 = "What did Caitlin Roberts order?"
@@ -100,3 +102,49 @@ for i, res in enumerate(results):
 # for i, res in enumerate(results):
 #     print(f"\n--- Result {i} ---\n")
 #     print(res.page_content)
+
+# CONNECT RAG + TinyLlama (FULL SYSTEM)
+
+generator = pipeline(
+    "text-generation",
+    model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    device_map="auto"
+)
+
+def ask_rag(query, vectorstore):
+    # Step 1: Retrieve
+    results = vectorstore.similarity_search(query, k=3)
+    
+    # Shows transparency (optional)
+    for i, doc in enumerate(results):
+        print(f"\n--- Retrieved {i} ---\n{doc.page_content[:300]}")
+    
+    context = "\n\n".join([doc.page_content for doc in results])
+    
+    # Step 2: Build prompt
+    messages = [
+        {
+            "role": "system",
+            "content": "Answer ONLY from the given context. If not found, say 'I don't know'."
+        },
+        {
+            "role": "user",
+            "content": f"Context:\n{context}\n\nQuestion: {query}"
+        }
+    ]
+    
+    # Step 3: Generate answer
+    response = generator(
+        messages,
+        max_new_tokens=200,
+        temperature=0.3
+    )
+    
+    return response[0]["generated_text"][-1]["content"]
+
+query = "What items are in invoice 0012820?"
+
+answer = ask_rag(query, vectorstore)
+
+print("\n=== FINAL ANSWER ===\n")
+print(answer)
