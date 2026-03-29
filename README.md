@@ -1,4 +1,5 @@
 # RAG-Based-Knowledge-Assistant
+![sample screen image](images/example.png)
 
 User Query
    ↓
