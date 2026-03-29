@@ -21,6 +21,7 @@ def ask_rag(query, vectorstore, all_chunks, generator):
     expanded = get_expanded_context(results, all_chunks)
     
     context = "\n\n".join([doc.page_content for doc in expanded])
+    context = context[:2000]   # truncate
     
     messages = [
         {
@@ -33,6 +34,10 @@ def ask_rag(query, vectorstore, all_chunks, generator):
         }
     ]
     
-    response = generator(messages, max_new_tokens=200, temperature=0.3)
+    response = generator(
+        messages,
+        max_new_tokens=100,   # ↓ from 200
+        temperature=0.3
+    )
     
     return response[0]["generated_text"][-1]["content"]
