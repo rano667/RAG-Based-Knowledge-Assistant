@@ -10,18 +10,6 @@ from transformers import pipeline
 
 # Step 1: Text extracted
 
-# # Loaded X pages ->  Text printed from PDF
-# def load_documents():
-#     loader = PyPDFLoader("data/invoice-0.pdf")
-#     documents = loader.load()
-#     return documents
-
-# docs = load_documents()
-
-# for i, doc in enumerate(docs[:3]):
-#     print(f"\n--- Page {i} ---\n")
-#     print(doc.page_content[:500])
-
 # Scalable
 def load_all_pdfs(folder_path):
     all_docs = []
@@ -40,11 +28,16 @@ print(f"Total pages loaded: {len(docs)}")
 
 def split_documents(documents):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=700, # 500
-        chunk_overlap=150 # 100
+        chunk_size=700,
+        chunk_overlap=150
     )
     
     chunks = text_splitter.split_documents(documents)
+    
+    # Add index metadata
+    for i, chunk in enumerate(chunks):
+        chunk.metadata["chunk_id"] = i
+    
     return chunks
 
 
@@ -52,10 +45,24 @@ chunks = split_documents(docs)
 
 print(f"Total chunks created: {len(chunks)}")
 
-# inspect chunks
-# for i, chunk in enumerate(chunks[:10]):
-#     print(f"\n--- Chunk {i} ---\n")
-#     print(chunk.page_content)
+def get_expanded_context(results, all_chunks):
+    expanded_chunks = []
+    
+    for res in results:
+        idx = res.metadata["chunk_id"]
+        
+        # current
+        expanded_chunks.append(all_chunks[idx])
+        
+        # previous
+        if idx - 1 >= 0:
+            expanded_chunks.append(all_chunks[idx - 1])
+        
+        # next
+        if idx + 1 < len(all_chunks):
+            expanded_chunks.append(all_chunks[idx + 1])
+    
+    return expanded_chunks
 
 # Step 3: Create Embeddings + Vector Store
 
@@ -76,33 +83,6 @@ vectorstore = create_vector_store(chunks)
 
 print("Vector store created successfully")
 
-# # query 0
-# query = "What items are in invoice 0012820?"
-
-# results = vectorstore.similarity_search(query, k=3)
-
-# for i, res in enumerate(results):
-#     print(f"\n--- Result {i} ---\n")
-#     print(res.page_content)
-
-# # query 1
-# query1 = "What did Caitlin Roberts order?"
-
-# results = vectorstore.similarity_search(query1, k=3)
-
-# for i, res in enumerate(results):
-#     print(f"\n--- Result {i} ---\n")
-#     print(res.page_content)
-
-# # query 2
-# query2 = "What is the total due?"
-
-# results = vectorstore.similarity_search(query2, k=3)
-
-# for i, res in enumerate(results):
-#     print(f"\n--- Result {i} ---\n")
-#     print(res.page_content)
-
 # CONNECT RAG + TinyLlama (FULL SYSTEM)
 
 generator = pipeline(
@@ -111,21 +91,17 @@ generator = pipeline(
     device_map="auto"
 )
 
-def ask_rag(query, vectorstore):
-    # Step 1: Retrieve
-    results = vectorstore.similarity_search(query, k=3)
+def ask_rag(query, vectorstore, all_chunks):
+    results = vectorstore.similarity_search(query, k=1)  # top 1
     
-    # Shows transparency (optional)
-    for i, doc in enumerate(results):
-        print(f"\n--- Retrieved {i} ---\n{doc.page_content[:300]}")
+    expanded = get_expanded_context(results, all_chunks)
     
-    context = "\n\n".join([doc.page_content for doc in results])
+    context = "\n\n".join([doc.page_content for doc in expanded])
     
-    # Step 2: Build prompt
     messages = [
         {
             "role": "system",
-            "content": "Answer ONLY from the given context. If not found, say 'I don't know'."
+            "content": "Answer ONLY from context. If missing, say 'I don't know'."
         },
         {
             "role": "user",
@@ -133,18 +109,15 @@ def ask_rag(query, vectorstore):
         }
     ]
     
-    # Step 3: Generate answer
-    response = generator(
-        messages,
-        max_new_tokens=200,
-        temperature=0.3
-    )
+    response = generator(messages, max_new_tokens=200, temperature=0.3)
     
     return response[0]["generated_text"][-1]["content"]
 
 query = "What items are in invoice 0012820?"
+# query = "What did Caitlin Roberts order?"
+# query = "What is the total due?"
 
-answer = ask_rag(query, vectorstore)
+answer = ask_rag(query, vectorstore, chunks)
 
 print("\n=== FINAL ANSWER ===\n")
 print(answer)
