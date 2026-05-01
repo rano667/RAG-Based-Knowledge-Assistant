@@ -40,6 +40,12 @@ pip install -r requirements.txt
 ## freeze dependencies (optional)
 pip freeze > requirements.txt
 
+## Get API Key
+Go to: https://console.groq.com, Sign in and generate your API key.
+
+## Create .env file in the root of your project:
+GROQ_API_KEY=your_api_key_here
+
 ## Start API
 uvicorn app.main:app --reload
 
