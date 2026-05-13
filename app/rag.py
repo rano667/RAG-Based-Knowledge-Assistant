@@ -1,3 +1,15 @@
+from multiprocessing import context
+import time
+from xmlrpc import client
+
+from app.logger import (
+    log_query,
+    log_retrieval,
+    log_context,
+    log_response_time,
+    log_final_answer
+)
+
 def get_expanded_context(results, all_chunks):
     expanded = []
     
@@ -16,45 +28,80 @@ def get_expanded_context(results, all_chunks):
 
 
 def ask_rag(query, vectorstore, all_chunks, client):
-    
-    # Retrieve top chunk
+
+    start_time = time.time()
+
+    # Log query
+    log_query(query)
+
+    # Retrieval
     results = vectorstore.similarity_search(query, k=1)
-    
+
+    # Log retrieved chunks
+    log_retrieval(results)
+
     # Expand context
     expanded = get_expanded_context(results, all_chunks)
-    
+
     # Build context
     context = "\n\n".join(
         [doc.page_content for doc in expanded]
     )
-    
-    # Limit context size
-    context = context[:1500]
-    
-    # Call Groq
+
+    context = context[:2500]
+
+    # Log context size
+    log_context(context)
+    print("\n🧠 FULL CONTEXT:")
+    print(context)
+
+    # LLM call
     response = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
             {
                 "role": "system",
                 "content": (
-                    "Answer ONLY from the provided context. "
-                    "Keep answers concise and accurate."
+                    """
+                    You are a document extraction system.
+
+                    Rules:
+                    1. ONLY use information explicitly present in the context.
+                    2. DO NOT infer or complete missing items.
+                    3. DO NOT guess.
+                    4. If information is incomplete, say 'Information incomplete in retrieved context.'
+                    5. Return concise bullet points only.
+                    """
                 )
             },
             {
                 "role": "user",
                 "content": (
-                    f"Context:\n{context}\n\n"
-                    f"Question: {query}"
+                    f"""
+                    Context:
+                    {context}
+
+                    Question:
+                    {query}
+
+                    Answer ONLY using exact information from context.
+                    """
                 )
             }
         ],
         temperature=0.3,
-        max_tokens=100
+        max_tokens=120
     )
-    
-    return response.choices[0].message.content
+
+    answer = response.choices[0].message.content
+
+    # Log latency
+    log_response_time(start_time)
+
+    # Log final answer
+    log_final_answer(answer)
+
+    return answer
 
 # # ---- Tiny Llama RAG Logic ----
 # def ask_rag(query, vectorstore, all_chunks, generator):
