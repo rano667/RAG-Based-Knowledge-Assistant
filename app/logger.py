@@ -11,7 +11,7 @@ def log_retrieval(results):
         chunk_id = doc.metadata.get("chunk_id", "unknown")
         
         print(f"\n--- Chunk {chunk_id} ---")
-        print(doc.page_content[:300])
+        print(doc.page_content[:500])
 
 def log_context(context):
     print(f"\n🧠 CONTEXT LENGTH: {len(context)} chars")

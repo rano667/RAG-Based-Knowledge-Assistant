@@ -52,8 +52,8 @@ def ask_rag(query, vectorstore, all_chunks, client):
 
     # Log context size
     log_context(context)
-    print("\n🧠 FULL CONTEXT:")
-    print(context)
+    # print("\n🧠 FULL CONTEXT:")
+    # print(context)
 
     # LLM call
     response = client.chat.completions.create(
