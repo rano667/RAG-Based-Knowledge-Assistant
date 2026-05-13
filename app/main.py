@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from app.retriever import split_documents, create_vector_store
 from app.llm import load_llm
 from app.rag import ask_rag
+from app.evaluation import evaluate_rag
+from app.eval_data import eval_data
 
 from langchain_community.document_loaders import PyPDFLoader
 import os
@@ -13,6 +15,14 @@ import os
 vectorstore = None
 chunks = None
 generator = None
+
+def ask_fn(query):
+    return ask_rag(
+        query,
+        vectorstore,
+        chunks,
+        generator
+    )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +41,8 @@ async def lifespan(app: FastAPI):
     
     generator = load_llm()
     print("LLM loaded")
+    
+    evaluate_rag(eval_data, ask_fn)
     
     yield
     
