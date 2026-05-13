@@ -16,16 +16,39 @@ def get_expanded_context(results, all_chunks):
 
 
 def ask_rag(query, vectorstore, all_chunks, client):
+    
+    # Retrieve top chunk
     results = vectorstore.similarity_search(query, k=1)
+    
+    # Expand context
     expanded = get_expanded_context(results, all_chunks)
     
-    context = "\n\n".join([doc.page_content for doc in expanded])[:1500]
+    # Build context
+    context = "\n\n".join(
+        [doc.page_content for doc in expanded]
+    )
     
+    # Limit context size
+    context = context[:1500]
+    
+    # Call Groq
     response = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
-            {"role": "system", "content": "Answer briefly using context only."},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}
+            {
+                "role": "system",
+                "content": (
+                    "Answer ONLY from the provided context. "
+                    "Keep answers concise and accurate."
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Context:\n{context}\n\n"
+                    f"Question: {query}"
+                )
+            }
         ],
         temperature=0.3,
         max_tokens=100
