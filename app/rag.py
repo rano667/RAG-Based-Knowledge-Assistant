@@ -101,7 +101,22 @@ def ask_rag(query, vectorstore, all_chunks, client):
     # Log final answer
     log_final_answer(answer)
 
-    return answer
+    retrieved_chunk_ids = [
+    doc.metadata.get("chunk_id")
+    for doc in results
+    ]
+
+    retrieved_sources = [
+        doc.metadata.get("source")
+        for doc in results
+    ]
+
+    return {
+        "answer": answer,
+        "retrieved_chunk_ids": retrieved_chunk_ids,
+        "retrieved_sources": retrieved_sources,
+        "context": context
+    }
 
 # # ---- Tiny Llama RAG Logic ----
 # def ask_rag(query, vectorstore, all_chunks, generator):

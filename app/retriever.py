@@ -12,6 +12,9 @@ def split_documents(documents):
     
     for i, chunk in enumerate(chunks):
         chunk.metadata["chunk_id"] = i
+        chunk.metadata["source"] = (
+            chunk.metadata.get("source", "unknown")
+        )
     
     return chunks
 
