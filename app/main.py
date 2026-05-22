@@ -7,6 +7,7 @@ from app.llm import load_llm
 from app.rag import ask_rag
 from app.evaluation import evaluate_rag
 from app.eval_data import eval_data
+from app.ragas_eval import run_ragas_evaluation
 
 from langchain_community.document_loaders import PyPDFLoader
 import os
@@ -43,6 +44,25 @@ async def lifespan(app: FastAPI):
     print("LLM loaded")
     
     evaluate_rag(eval_data, ask_fn)
+    
+    sample_result = ask_fn(
+        "What items are in invoice 0012820?"
+    )
+
+    ragas_result = run_ragas_evaluation(
+        question="What items are in invoice 0012820?",
+
+        answer=sample_result["answer"],
+
+        contexts=[sample_result["context"]],
+
+        ground_truth=(
+            "Exterior Protection, Temporary Lighting, "
+            "Theater and Stage Equipment"
+        )
+    )
+
+    print(ragas_result)
     
     yield
     

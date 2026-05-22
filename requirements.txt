@@ -12,3 +12,6 @@ langchain-text-splitters
 pypdf
 groq
 python-dotenv
+ragas[transformers]
+datasets
+langchain-groq
