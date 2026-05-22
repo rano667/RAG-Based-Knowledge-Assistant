@@ -73,6 +73,17 @@ Start the backend:
 uvicorn app.main:app --reload
 ```
 
+Build and run the API container:
+
+```bash
+docker build -t rag-knowledge-assistant .
+docker run --rm -p 8000:8000 --env-file .env rag-knowledge-assistant
+```
+
+The Docker image uses the smaller `requirements-api.txt` runtime set. The root
+`requirements.txt` keeps Streamlit and offline evaluation dependencies for local
+development.
+
 Start the UI in another terminal:
 
 ```bash
