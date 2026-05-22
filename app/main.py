@@ -1,101 +1,61 @@
-from fastapi import FastAPI
+"""FastAPI entry point for online RAG requests."""
+
+from __future__ import annotations
+
+import logging
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
+from typing import AsyncIterator, cast
 
-from app.retriever import split_documents, create_vector_store
-from app.llm import load_llm
-from app.rag import ask_rag
-from app.evaluation import evaluate_rag
-from app.eval_data import eval_data
-from app.ragas_eval import run_ragas_evaluation
+from fastapi import FastAPI, HTTPException, Request
 
-from langchain_community.document_loaders import PyPDFLoader
-import os
+from app.config import get_settings
+from app.logger import configure_logging, log_event
+from app.rag import RagPipeline, build_rag_pipeline
+from app.schemas import QueryRequest, QueryResponse
 
-# ---- Global Variables ----
-vectorstore = None
-chunks = None
-generator = None
+logger = logging.getLogger(__name__)
 
-def ask_fn(query):
-    return ask_rag(
-        query,
-        vectorstore,
-        chunks,
-        generator
-    )
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    global vectorstore, chunks, generator
-    
-    print("🚀 Starting up... Loading models and data")
-    
-    documents = load_documents("data")
-    print(f"Loaded docs: {len(documents)}")
-    
-    chunks = split_documents(documents)
-    print(f"Chunks created: {len(chunks)}")
-    
-    vectorstore, _ = create_vector_store(chunks)
-    print("Vector store ready")
-    
-    generator = load_llm()
-    print("LLM loaded")
-    
-    evaluate_rag(eval_data, ask_fn)
-    
-    sample_result = ask_fn(
-        "What items are in invoice 0012820?"
-    )
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Initialize heavy runtime dependencies once per API process."""
 
-    ragas_result = run_ragas_evaluation(
-        question="What items are in invoice 0012820?",
-
-        answer=sample_result["answer"],
-
-        contexts=[sample_result["context"]],
-
-        ground_truth=(
-            "Exterior Protection, Temporary Lighting, "
-            "Theater and Stage Equipment"
-        )
-    )
-
-    print(ragas_result)
-    
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.json_logs)
+    log_event(logger, "api_startup_started")
+    app.state.rag_pipeline = build_rag_pipeline(settings)
+    log_event(logger, "api_startup_completed")
     yield
-    
-    print("🛑 Shutting down")
+    log_event(logger, "api_shutdown")
 
-# ---- INIT ----
-app = FastAPI(lifespan=lifespan)
 
-# Load everything once
-def load_documents(folder_path="data"):
-    all_docs = []
-    
-    for file in os.listdir(folder_path):
-        if file.endswith(".pdf"):
-            loader = PyPDFLoader(os.path.join(folder_path, file))
-            all_docs.extend(loader.load())
-    
-    return all_docs
+app = FastAPI(
+    title="RAG Knowledge Assistant",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
-# (later we optimize startup)
-# documents = load_documents("data")
-# print(f"Loaded documents: {len(documents)}")
-# chunks = split_documents(documents)
-# print(f"Total chunks: {len(chunks)}")
 
-# vectorstore, embeddings = create_vector_store(chunks)
-# generator = load_llm()
+def get_pipeline(request: Request) -> RagPipeline:
+    """Read the initialized RAG pipeline from FastAPI application state."""
 
-# ---- API ----
-class QueryRequest(BaseModel):
-    query: str
+    return cast(RagPipeline, request.app.state.rag_pipeline)
 
-@app.post("/ask")
-def ask(request: QueryRequest):
-    answer = ask_rag(request.query, vectorstore, chunks, generator)
-    return {"answer": answer}
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """Return a lightweight liveness response."""
+
+    return {"status": "ok"}
+
+
+@app.post("/ask", response_model=QueryResponse)
+def ask(request_body: QueryRequest, request: Request) -> QueryResponse:
+    """Answer a question from documents loaded during API startup."""
+
+    query = request_body.query.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="query must not be blank")
+
+    result = get_pipeline(request).ask(query)
+    return result.to_api_response()

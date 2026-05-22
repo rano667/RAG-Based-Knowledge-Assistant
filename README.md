@@ -1,537 +1,134 @@
-# RAG-Based-Knowledge-Assistant
+# RAG-Based Knowledge Assistant
 
-Production-grade Retrieval-Augmented Generation (RAG) system built using open-source embeddings, FAISS vector search, FastAPI, Streamlit, and LLM-based response generation.
-
-This project processes invoice PDFs and enables users to query documents using natural language with grounded AI-generated responses.
-
----
-
-# 📸 Demo
+A document question-answering system for invoice PDFs using FastAPI, FAISS,
+HuggingFace embeddings, Groq-hosted Llama 3.1 generation, Streamlit, custom
+offline metrics, and optional RAGAS evaluation.
 
 ![sample screen image](images/example.png)
 
----
+## Features
 
-# 🚀 Features
+- PDF ingestion with stable chunk IDs for benchmarkable retrieval.
+- Semantic retrieval over an in-memory FAISS index.
+- Neighbor-aware context expansion for chunked invoice tables.
+- Grounded Groq answer generation behind a typed RAG pipeline.
+- FastAPI lifespan startup so heavy index/model clients load once per process.
+- Streamlit UI for interactive queries.
+- Structured logging with optional JSON output.
+- Offline evaluation for Precision@1, keyword recall, grounding overlap,
+  latency, experimental hallucination flags, and RAGAS metrics.
 
-- PDF document ingestion
-- Semantic search using FAISS
-- Open-source embeddings (`sentence-transformers`)
-- Retrieval-Augmented Generation (RAG)
-- Neighbor-aware retrieval for improved context continuity
-- FastAPI backend
-- Streamlit UI
-- Modular production-style architecture
-- Open-source / Groq-powered LLM support
-- Startup lifecycle optimization
-- Production-style folder structure
-
----
-
-# 🧠 Problem Statement
-
-Traditional keyword-based document search systems struggle to understand semantic meaning and contextual relationships inside documents.
-
-This project solves that problem using Retrieval-Augmented Generation (RAG), allowing users to:
-
-- Query invoice PDFs using natural language
-- Retrieve semantically relevant information
-- Generate grounded responses using LLMs
-- Reduce hallucinations through retrieval-based context injection
-
----
-
-# 🏗️ System Architecture
+## Architecture
 
 ```text
-User Query
-    ↓
-FastAPI Backend
-    ↓
-FAISS Semantic Search
-    ↓
-Relevant Chunk Retrieval
-    ↓
-Neighbor Chunk Expansion
-    ↓
-LLM Context Injection
-    ↓
-Groq / TinyLlama Response Generation
-    ↓
-Final Grounded Answer
+app/
+|-- config.py              # Environment-backed runtime settings
+|-- llm.py                 # Groq generation boundary and prompt
+|-- logger.py              # Text or JSON structured logging
+|-- main.py                # FastAPI online entry point
+|-- rag.py                 # Pipeline orchestration and context expansion
+|-- retriever.py           # PDF ingestion, chunking, embeddings, FAISS
+|-- schemas.py             # API and internal response shapes
+`-- evaluation/
+    |-- benchmark.py       # Offline benchmark dataset
+    |-- metrics.py         # Custom metrics
+    |-- ragas_eval.py      # Optional RAGAS adapter
+    |-- report.py          # Evaluation result models and reporting
+    `-- run_eval.py        # Offline CLI runner
 ```
 
----
+The online API does not import or execute evaluation code. Both the API and the
+offline runner build the same `RagPipeline`, so evaluation exercises the real
+retrieval and generation path without coupling benchmark work to FastAPI.
 
-# ⚙️ Tech Stack
-
-## Backend
-
-- Python
-- FastAPI
-- Uvicorn
-
----
-
-## AI / RAG
-
-- LangChain
-- FAISS
-- Sentence Transformers
-- HuggingFace
-- TinyLlama
-- Groq API
-
----
-
-## Frontend
-
-- Streamlit
-
----
-
-## Embedding Model
+## Runtime Flow
 
 ```text
-sentence-transformers/all-MiniLM-L6-v2
+PDF pages -> chunks -> HuggingFace embeddings -> FAISS
+query -> top-k retrieval -> neighbor expansion -> bounded context
+context + query -> Groq generation -> typed answer response
 ```
 
----
+The public `/ask` response includes the answer, retrieval IDs/sources, and
+latency. Full context remains internal so evaluation can score grounding without
+returning retrieved document text to every API caller.
 
-## LLMs Used
+## Setup
 
-### Local Model
+1. Create a virtual environment and install dependencies.
 
-```text
-TinyLlama/TinyLlama-1.1B-Chat-v1.0
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### Hosted Inference
+2. Create `.env` from `.env.example` and set `GROQ_API_KEY`.
 
-```text
-llama-3.1-8b-instant
-```
+3. Put PDF files in `data/` or set `RAG_DATA_DIR`.
 
----
+## Run
 
-# 📂 Project Structure
-
-```text
-rag-system/
-│
-├── app/
-│   ├── main.py              # FastAPI entry point
-│   ├── rag.py               # Core RAG pipeline
-│   ├── retriever.py         # Chunking + embeddings + FAISS
-│   ├── llm.py               # LLM integration
-│   ├── evaluation.py        # Evaluation logic
-│   ├── logger.py            # Logging utilities
-│
-├── data/                    # PDF invoices
-│
-├── ui/
-│   └── streamlit_app.py     # Frontend UI
-│
-├── images/
-│
-├── requirements.txt
-└── README.md
-```
-
----
-
-# 🔍 How Retrieval Works
-
-## Step 1 — PDF Ingestion
-
-Invoice PDFs are loaded using:
-
-```python
-PyPDFLoader
-```
-
----
-
-## Step 2 — Chunking
-
-Documents are split into semantic chunks using:
-
-```python
-RecursiveCharacterTextSplitter
-```
-
-Current configuration:
-
-```python
-chunk_size=700
-chunk_overlap=150
-```
-
----
-
-## Step 3 — Embeddings
-
-Chunks are converted into dense vector embeddings using:
-
-```text
-sentence-transformers/all-MiniLM-L6-v2
-```
-
----
-
-## Step 4 — Vector Storage
-
-Embeddings are stored inside:
-
-```text
-FAISS Vector Database
-```
-
----
-
-## Step 5 — Semantic Retrieval
-
-When a user asks a query:
-
-- Query is converted to embeddings
-- FAISS retrieves semantically similar chunks
-- Neighbor chunks are expanded for continuity
-
----
-
-## Step 6 — LLM Generation
-
-Retrieved context is passed into:
-
-- TinyLlama (local)
-- OR Groq-hosted Llama 3.1
-
-The LLM generates grounded responses using retrieved context.
-
----
-
-# 🧠 Key Engineering Decisions
-
-## Neighbor-Aware Retrieval
-
-### Problem
-
-Semantic chunking caused invoice tables to split across chunks.
-
-Example:
-
-- Half the invoice items in chunk A
-- Remaining items in chunk B
-
-This caused incomplete answers.
-
----
-
-### Solution
-
-Implemented neighbor-aware retrieval:
-
-- Retrieve top semantic chunk
-- Expand previous + next chunks
-- Preserve semantic continuity
-
-This significantly improved retrieval quality.
-
----
-
-## Startup Optimization
-
-### Problem
-
-Embeddings and vector store were reloading on every API request.
-
-This caused:
-
-- High latency
-- Slow startup
-- Poor user experience
-
----
-
-### Solution
-
-Used FastAPI lifespan startup events to preload:
-
-- Documents
-- Chunks
-- Embeddings
-- Vector store
-- LLM
-
-Result:
-
-- Faster API response
-- Reduced repeated computation
-
----
-
-## Latency Optimization
-
-### Problem
-
-Local TinyLlama inference was slow on limited hardware.
-
-System specs:
-
-- Intel i3 CPU
-- 8GB RAM
-
-Inference caused:
-
-- CPU saturation
-- RAM exhaustion
-- Slow responses
-
----
-
-### Solution
-
-Integrated Groq-hosted inference for:
-
-- Faster generation
-- Reduced local resource usage
-- Better scalability
-
----
-
-# 📌 Example Query
-<!-- query = "What did Caitlin Roberts order?" -->
-<!-- query = "What is the total due?" -->
-
-```python
-query = "What items are in invoice 0012820?"
-```
-
----
-
-# ✅ Example Response
-
-```text
-Invoice 0012820 includes the following items:
-
-1. 10-700 - Exterior Protection (10)
-2. 1-515 - Temporary Lighting (29)
-3. 11-060 - Theater and Stage Equipment (17)
-4. 1-600 - Product Requirements (Scope of Work) (20)
-5. 12-050 - Fabrics (23)
-6. 2-823 - PVC Fences and Gates (27)
-7. 6-400 - Architectural Woodwork (26)
-8. 2-820 - Fences and Gates (15)
-9. 9-700 - Wall Finishes (1)
-10. 2-795 - Porous Paving (30)
-```
-
----
-
-# 🔐 Environment Setup
-
-## 1. Clone Repository
-
-```bash
-git clone <your_repo_url>
-cd rag-system
-```
-
----
-
-## 2. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## 3. Create Groq API Key
-
-Create a free API key from:
-
-```text
-https://console.groq.com
-```
-
----
-
-## 4. Create `.env` File
-
-In the root directory:
-
-```env
-GROQ_API_KEY=your_api_key_here
-```
-
----
-
-## 5. Add `.env` to `.gitignore`
-
-```bash
-.env
-```
-
----
-
-# ▶️ Running the Project
-
-## Start FastAPI Backend
+Start the backend:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Backend URL:
-
-```text
-http://127.0.0.1:8000
-```
-
----
-
-## Start Streamlit UI
+Start the UI in another terminal:
 
 ```bash
 streamlit run ui/streamlit_app.py
 ```
 
----
+Health check:
 
-# 🌐 API Endpoint
-
-## POST `/ask`
-
-### Request
-
-```json
-{
-  "query": "What items are in invoice 0012820?"
-}
+```text
+GET http://127.0.0.1:8000/health
 ```
 
----
+Ask endpoint:
 
-### Response
+```http
+POST /ask
+Content-Type: application/json
 
-```json
-{
-  "answer": "Invoice 0012820 includes..."
-}
+{"query": "What items are in invoice 0012820?"}
 ```
 
----
+## Offline Evaluation
 
-# 🧪 Evaluation Strategy
+Custom benchmark metrics:
 
-The project includes a basic evaluation framework for:
+```bash
+python -m app.evaluation.run_eval
+```
 
-- Retrieval quality
-- Answer correctness
-- Context grounding
+Custom metrics plus RAGAS:
 
-Planned evaluation improvements:
+```bash
+python -m app.evaluation.run_eval --ragas
+```
 
-- Precision@K
-- Retrieval relevance scoring
-- Hallucination detection
-- Automated benchmark datasets
+The RAGAS path uses the same generated answers and retrieved context produced by
+the offline pipeline. It preserves faithfulness, answer relevancy, context
+precision, and context recall with ChatGroq as evaluator and HuggingFace
+embeddings.
 
----
+## Configuration
 
-# 📊 Logging Strategy
+Defaults live in `.env.example`. Important deployment knobs are:
 
-The system is designed to log:
+- `RAG_DATA_DIR` for the mounted PDF directory.
+- `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, and `RAG_RETRIEVAL_K`.
+- `RAG_MAX_CONTEXT_CHARS` and `RAG_MAX_ANSWER_TOKENS`.
+- `GROQ_GENERATION_MODEL` and `GROQ_EVALUATOR_MODEL`.
+- `LOG_LEVEL` and `JSON_LOGS`.
 
-- User query
-- Retrieved chunks
-- Context size
-- LLM latency
-- Response generation time
+## Engineering Notes
 
-This helps debug:
-
-- Retrieval issues
-- Hallucinations
-- Performance bottlenecks
-
----
-
-# 🚀 Future Improvements
-
-## Retrieval
-
-- Metadata filtering
-- Hybrid search (BM25 + vector search)
-- Table-aware chunking
-- Better semantic splitting
-
----
-
-## AI
-
-- Multi-agent workflows
-- Tool calling
-- Agentic retrieval
-- Evaluation agents
-
----
-
-## Infra
-
-- Dockerization
-- AWS deployment
-- ECS / ECR pipelines
-- CI/CD
-- GPU inference
-
----
-
-## Product
-
-- Authentication
-- Multi-user support
-- Chat history
-- File upload UI
-- Persistent vector DB
-
----
-
-# 📚 Learning Outcomes
-
-This project helped explore:
-
-- Retrieval-Augmented Generation (RAG)
-- Semantic search pipelines
-- Vector databases
-- Open-source embeddings
-- Prompt engineering
-- Context management
-- AI backend architecture
-- Latency optimization
-- Production-style AI system design
-
----
-
-# 👨‍💻 Author
-
-## Ranjan Mondal
-
-### Links
-
-- GitHub: https://github.com/rano667
-- LinkedIn: https://www.linkedin.com/in/ranjanmondal/
-
----
-
-# ⭐ Final Note
-
-This project was built not just as a tutorial implementation, but as a step toward production-grade AI systems engineering with strong focus on:
-
-- System thinking
-- Retrieval quality
-- Modularity
-- Optimization
-- Real-world AI architecture
-
+- PDF ordering is sorted before chunk IDs are assigned so benchmark chunk IDs
+  stay stable for the same dataset.
+- Custom word-overlap grounding is a cheap review signal. RAGAS faithfulness is
+  the stronger LLM-based check when evaluator cost and latency are acceptable.
+- The FAISS index is process-local and rebuilt at startup. Persisted indexes,
+  file upload ingestion, table-aware parsing, and hybrid search are natural next
+  steps for a larger deployment.

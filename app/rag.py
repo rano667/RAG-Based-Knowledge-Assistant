@@ -1,152 +1,146 @@
-from multiprocessing import context
-import time
-from xmlrpc import client
+"""Core RAG orchestration."""
 
-from app.logger import (
-    log_query,
-    log_retrieval,
-    log_context,
-    log_response_time,
-    log_final_answer
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from time import perf_counter
+from typing import Sequence
+
+from groq import Groq
+from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
+
+from app.config import Settings, get_settings
+from app.llm import generate_grounded_answer, load_llm
+from app.logger import log_event, log_retrieval
+from app.retriever import (
+    create_vector_store,
+    load_pdf_documents,
+    retrieve_chunks,
+    split_documents,
 )
+from app.schemas import RagResponse
 
-def get_expanded_context(results, all_chunks):
-    expanded = []
-    
-    for res in results:
-        idx = res.metadata["chunk_id"]
-        
-        expanded.append(all_chunks[idx])
-        
-        if idx - 1 >= 0:
-            expanded.append(all_chunks[idx - 1])
-        
-        if idx + 1 < len(all_chunks):
-            expanded.append(all_chunks[idx + 1])
-    
+logger = logging.getLogger(__name__)
+
+
+def expand_neighbor_context(
+    retrieved_chunks: Sequence[Document],
+    all_chunks: Sequence[Document],
+) -> list[Document]:
+    """Return retrieved chunks with immediate neighbors, without duplicates."""
+
+    expanded: list[Document] = []
+    seen_chunk_ids: set[int] = set()
+
+    for retrieved in retrieved_chunks:
+        chunk_id = retrieved.metadata.get("chunk_id")
+        if not isinstance(chunk_id, int):
+            continue
+
+        for neighbor_id in (chunk_id - 1, chunk_id, chunk_id + 1):
+            if neighbor_id < 0 or neighbor_id >= len(all_chunks):
+                continue
+            if neighbor_id in seen_chunk_ids:
+                continue
+            expanded.append(all_chunks[neighbor_id])
+            seen_chunk_ids.add(neighbor_id)
+
     return expanded
 
 
-def ask_rag(query, vectorstore, all_chunks, client):
+def build_context(documents: Sequence[Document], max_chars: int) -> str:
+    """Join retrieved document content with a defensive character limit."""
 
-    start_time = time.time()
+    return "\n\n".join(doc.page_content for doc in documents)[:max_chars]
 
-    # Log query
-    log_query(query)
 
-    # Retrieval
-    results = vectorstore.similarity_search(query, k=1)
+@dataclass
+class RagPipeline:
+    """Stateful RAG service built once at API startup or offline evaluation."""
 
-    # Log retrieved chunks
-    log_retrieval(results)
+    vectorstore: FAISS
+    chunks: list[Document]
+    llm_client: Groq
+    settings: Settings
 
-    # Expand context
-    expanded = get_expanded_context(results, all_chunks)
+    def ask(self, query: str) -> RagResponse:
+        """Retrieve document context and generate one grounded answer."""
 
-    # Build context
-    context = "\n\n".join(
-        [doc.page_content for doc in expanded]
+        started_at = perf_counter()
+        retrieved = retrieve_chunks(
+            self.vectorstore,
+            query=query,
+            k=self.settings.retrieval_k,
+        )
+        log_retrieval(logger, query, retrieved)
+
+        expanded_context = expand_neighbor_context(retrieved, self.chunks)
+        context = build_context(expanded_context, self.settings.max_context_chars)
+        answer = generate_grounded_answer(
+            self.llm_client,
+            query=query,
+            context=context,
+            model=self.settings.generation_model,
+            temperature=self.settings.generation_temperature,
+            max_tokens=self.settings.max_answer_tokens,
+        )
+        latency_seconds = perf_counter() - started_at
+
+        log_event(
+            logger,
+            "rag_answer_generated",
+            context_chars=len(context),
+            latency_seconds=round(latency_seconds, 4),
+        )
+        return RagResponse(
+            answer=answer,
+            retrieved_chunk_ids=[doc.metadata.get("chunk_id") for doc in retrieved],
+            retrieved_sources=[doc.metadata.get("source") for doc in retrieved],
+            context=context,
+            latency_seconds=latency_seconds,
+        )
+
+
+def build_rag_pipeline(settings: Settings | None = None) -> RagPipeline:
+    """Load PDF data, vector index, and Groq client once."""
+
+    active_settings = settings or get_settings()
+    documents = load_pdf_documents(active_settings.data_dir)
+    chunks = split_documents(
+        documents,
+        chunk_size=active_settings.chunk_size,
+        chunk_overlap=active_settings.chunk_overlap,
+    )
+    vectorstore, _ = create_vector_store(chunks, active_settings.embedding_model)
+    log_event(
+        logger,
+        "rag_pipeline_built",
+        documents=len(documents),
+        chunks=len(chunks),
+        data_dir=str(active_settings.data_dir),
+    )
+    return RagPipeline(
+        vectorstore=vectorstore,
+        chunks=chunks,
+        llm_client=load_llm(),
+        settings=active_settings,
     )
 
-    context = context[:2500]
 
-    # Log context size
-    log_context(context)
-    # print("\n🧠 FULL CONTEXT:")
-    # print(context)
+def ask_rag(
+    query: str,
+    vectorstore: FAISS,
+    all_chunks: list[Document],
+    client: Groq,
+    settings: Settings | None = None,
+) -> RagResponse:
+    """Backward-compatible functional entry point for the RAG pipeline."""
 
-    # LLM call
-    response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    """
-                    You are a document extraction system.
-
-                    Rules:
-                    1. ONLY use information explicitly present in the context.
-                    2. DO NOT infer or complete missing items.
-                    3. DO NOT guess.
-                    4. If information is incomplete, say 'Information incomplete in retrieved context.'
-                    5. Return concise bullet points only.
-                    """
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"""
-                    Context:
-                    {context}
-
-                    Question:
-                    {query}
-
-                    Answer ONLY using exact information from context.
-                    """
-                )
-            }
-        ],
-        temperature=0.3,
-        max_tokens=120
-    )
-
-    answer = response.choices[0].message.content
-
-    # Log latency
-    log_response_time(start_time)
-
-    # Log final answer
-    log_final_answer(answer)
-
-    retrieved_chunk_ids = [
-    doc.metadata.get("chunk_id")
-    for doc in results
-    ]
-
-    retrieved_sources = [
-        doc.metadata.get("source")
-        for doc in results
-    ]
-
-    return {
-        "answer": answer,
-        "retrieved_chunk_ids": retrieved_chunk_ids,
-        "retrieved_sources": retrieved_sources,
-        "context": context
-    }
-
-# # ---- Tiny Llama RAG Logic ----
-# def ask_rag(query, vectorstore, all_chunks, generator):
-#     results = vectorstore.similarity_search(query, k=1)
-    
-#     expanded = get_expanded_context(results, all_chunks)
-    
-#     MAX_CONTEXT_CHARS = 1500
-    
-#     context = "\n\n".join([doc.page_content for doc in expanded])
-#     context = context[:MAX_CONTEXT_CHARS]   # truncate
-    
-#     if len(context.strip()) == 0:
-#         return "I don't know"
-    
-#     messages = [
-#         {
-#             "role": "system",
-#             "content": "Answer ONLY from context. Keep it under 3 bullet points. If not found, say 'I don't know'."
-#         },
-#         {
-#             "role": "user",
-#             "content": f"Context:\n{context}\n\nQuestion: {query}"
-#         }
-#     ]
-    
-#     response = generator(
-#         messages,
-#         max_new_tokens=80,   # ↓ from 200
-#         temperature=0.3
-#     )
-    
-#     return response[0]["generated_text"][-1]["content"]
+    return RagPipeline(
+        vectorstore=vectorstore,
+        chunks=all_chunks,
+        llm_client=client,
+        settings=settings or get_settings(),
+    ).ask(query)

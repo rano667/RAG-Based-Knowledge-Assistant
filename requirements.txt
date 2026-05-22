@@ -1,17 +1,20 @@
+# API and UI
 fastapi
 uvicorn
 streamlit
-transformers
-torch
-accelerate
+requests
+
+# RAG runtime
 faiss-cpu
-sentence-transformers
-langchain
+groq
 langchain-community
 langchain-text-splitters
 pypdf
-groq
 python-dotenv
-ragas[transformers]
+sentence-transformers
+
+# Offline evaluation
 datasets
 langchain-groq
+# The evaluation module uses the RAGAS legacy evaluate()/metric API.
+ragas[transformers]>=0.1.21,<0.2
