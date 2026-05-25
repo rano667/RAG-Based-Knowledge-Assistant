@@ -53,6 +53,13 @@ The public `/ask` response includes the answer, retrieval IDs/sources, and
 latency. Full context remains internal so evaluation can score grounding without
 returning retrieved document text to every API caller.
 
+## Live Deployment
+
+- Backend API: deployed on AWS ECS and available at
+  `http://40.192.14.146:8000/ask`.
+- Streamlit frontend: deployed on Streamlit Community Cloud at
+  `https://rag-based-knowledge-assistant-667.streamlit.app/`.
+
 ## Setup
 
 1. Create a virtual environment and install dependencies.
@@ -73,6 +80,12 @@ Start the backend:
 uvicorn app.main:app --reload
 ```
 
+The deployed backend is available at:
+
+```text
+http://40.192.14.146:8000/ask
+```
+
 Build and run the API container:
 
 ```bash
@@ -88,6 +101,12 @@ Start the UI in another terminal:
 
 ```bash
 streamlit run ui/streamlit_app.py
+```
+
+The deployed Streamlit app is available at:
+
+```text
+https://rag-based-knowledge-assistant-667.streamlit.app/
 ```
 
 Health check:
