@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 
+from config import API_URL
+
 sample_questions = [
     "Custom Question...",
     "What items are in invoice 0012820?",
@@ -76,7 +78,7 @@ else:
 # -----------------------------
 # SUBMIT BUTTON
 # -----------------------------
-if st.button("Submit"):
+if st.button("Ask"):
 
     if not query.strip():
         st.warning("Please enter a query.")
@@ -88,7 +90,7 @@ if st.button("Submit"):
 
             try:
                 res = requests.post(
-                    "http://40.192.14.146:8000/ask",
+                    API_URL,
                     json={"query": query},
                     timeout=120
                 )
